@@ -1,0 +1,165 @@
+---
+title: "Predicting Activities Using Sensor Data - Practical Machine Learning Course Project"
+author: "Patrick de Guzman"
+date: "July 30, 2019"
+output: html_document
+---
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+# Synopsis  
+The following report will be an analysis and prediction model of the Human Activity Recognition (HAR) data shared via the following [research](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har). After loading, cleaning, and preprocessing the data with Principal Components Analysis (PCA), 3 models were fitted to test accuracy of prediction: random forests (rf), boosting (gbm), and linear discriminant analysis (lda). The random forests model showed the highest accuracy rate at **0.9750 accuracy with an interval in the range [0.9707, 0.9789]**. Cross-validation methods were set as 'cv' across all models for simplicity in computations, and PCA was performed in order to consolidate the large number of predictors in the original dataset.
+
+
+# Loading the Data and Necessary Libraries
+
+The HAR dataset is loaded from the below urls. Each set is read into a .csv file and the names() function is called on the training set to show the first few indicators. The total number of indicators is also noted.  
+```{r, message = FALSE}
+library(caret)
+
+trainingurl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testingurl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+if(!file.exists("./train")){download.file(trainingurl, destfile = "./train")}
+if(!file.exists("./test")){download.file(testingurl, destfile = "./test")}
+
+train <- read.csv("./train")
+test <- read.csv("./test")
+
+list(FirstFewIndicators = head(names(train)),totalIndicators = length(names(train)))
+```
+
+# Cleaning the Data
+
+The first few rows are removed as these identifiers are not required for prediction: 
+```{r}
+train <- train[,-c(1:7)]
+test <- test[,-c(1:7)]
+```
+
+We also remove predictors with high proportions of NA values in the original dataset: 
+```{r}
+NAs <- apply(train, 2, is.na)
+ToRemove <- apply(NAs, 2, mean) > 0.75
+train <- train[,ToRemove==FALSE]
+test <- test[,ToRemove==FALSE]
+```
+
+Lastly, we remove variables with near zero variance as these will not be useful in our modelling: 
+```{r}
+train <- train[,-nearZeroVar(train)]
+test <- test[,-nearZeroVar(test)]
+```
+
+# Split Training and Test Sets within 'train' data  
+Within the training set, we further split this into a secondary training set 'trainsub' to be used for training the models, as well as a secondary 'testsub' validation set to estimate the accuracy of our models prior to applying it to the final test set. 
+```{r}
+set.seed(1111)
+inTrain <- createDataPartition(y = train$classe, p = 0.7, list = FALSE)
+trainsub <- train[inTrain,]
+testsub <- train[-inTrain,]
+rbind(dim(trainsub),dim(testsub))
+```
+
+# Correlation Analysis to Determine Principal Component Analysis  
+Since there are a large number of predictors, we can review the correlation between each pair of predictors to determine if a principal components analysis will be helpful in our final model.  
+The following code determines the number of predictors that have a high correlation to each other (>0.75):
+
+```{r}
+cors <- abs(cor(trainsub[,-53]))
+diag(cors) <- 0
+correlations <- which(cors > 0.75, arr.ind = T)
+dim(correlations)[1]/2
+```
+
+Since there appear to be a large number of highly-correlated predictors (out of the total number of predictors in the set), we will use Principal Components Analysis (PCA).
+
+# Principal Components Analysis  
+The PCA will be performed using the preProcess() function outside of the model fitting train() function to separate the computationally-intensive commands as this new PC data will need to be used in training each model: 
+
+```{r}
+set.seed(1111)
+preProc <- preProcess(trainsub, method = "pca", thresh = 0.9)
+trainsubPC <- predict(preProc, trainsub)
+testsubPC <- predict(preProc, testsub)
+testPC <- predict(preProc, test)
+```
+
+# Building the Models  
+3 models were built and their accuracy was tested against the validation test set created within 'testsub'.  
+Within all models in the train() function trControl options, cross-validation method was set = "cv" with number = "3" for simplicity across comparing models and computational speed considerations.  
+All models were built using the preProcessed principal components 'trainsubPC' set to ensure consistency across all models. 
+
+In terms of model selection,  
+- random forests are known to provide the most accurate results and is expected to outperform other models, especially in this scenario with a data set consisting of a large number of predictors.  
+- the boosting model was tested in an attempt to combine the several (possibly) weak predictors in the original dataset.  
+- lastly, the linear discriminant analysis model was tested since all variables in the resulting training and testing subsets are continuous which may give way for more accurate results in the fitting (i.e., none of the predictors are categorical).  
+
+# Random Forest (Rf) Model
+## Building the Rf Model
+```{r}
+set.seed(1111)
+rfmodel <- train(classe ~., data = trainsubPC, method = "rf", trControl = trainControl(method = "cv", number = 3))
+rfmodel
+```
+
+## Fitting the rf Model to the Testing Validation Set
+```{r}
+set.seed(1111)
+rfprediction <- predict(rfmodel, newdata = testsubPC)
+rfresults <- confusionMatrix(rfprediction, testsubPC$classe)
+rfresults
+```
+
+
+# Boosting (gbm) Model
+## Building the gbm Model
+```{r}
+set.seed(1111)
+gbmmodel <- train(classe ~., data = trainsubPC, method = "gbm", trControl = trainControl(method = "cv", number = 3), verbose = FALSE)
+gbmmodel$finalModel
+```
+
+## Fitting the gbm Model to the Testing Validation Set
+```{r}
+set.seed(1111)
+gbmprediction <- predict(gbmmodel, newdata = testsubPC)
+confusionMatrix(gbmprediction, testsubPC$classe)
+```
+
+
+# Linear Discriminant (lda) Model
+## Building the lda Model
+```{r}
+set.seed(1111)
+ldamodel <- train(classe ~., data = trainsubPC, method = "lda", trControl = trainControl(method = "cv", number = 3))
+ldamodel
+```
+
+## Fitting the lda Model to the Testing Validation Set
+```{r}
+set.seed(1111)
+ldaprediction <- predict(ldamodel, newdata = testsubPC)
+confusionMatrix(ldaprediction, testsubPC$classe)
+```
+
+# Results & Final Testing  
+From the predictions performed with the random forest, boosting, and linear discriminant analysis models, the model we will use on the final testing set is the random forest model as it has the highest accuracy. 
+
+The random forest model showed the following results against the validation test set:
+```{r}
+data.frame(rfresults$overall)
+```
+
+The rf model shows 0.9750 accuracy with an interval in the range [0.9707, 0.9789]. 
+
+We should expect to see a similar (but slightly lower) accuracy on the final test set (and therefore, an out-of-sample error similar, but slightly higher, to the one shown) since we separated the training set into a validation training and test set previously. 
+
+The final fit on the testing set is run as follows: 
+```{r}
+set.seed(1111)
+finalpredict <- predict(rfmodel, newdata = testPC)
+finalpredict
+```
