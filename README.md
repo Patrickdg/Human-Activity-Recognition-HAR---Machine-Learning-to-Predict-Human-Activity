@@ -1,4 +1,4 @@
-# Human Activity Recognition (HAR) Dataset - Machine Learning to Predict Human Activity
+# Human Activity Recognition (HAR) - Machine Learning to Predict Human Activity
 
 This project was completed as part of the Practical Machine Learning course offered by Johns Hopkins University through Coursera.  
 
